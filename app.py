@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from nsepython import nse_eq, nse_optionchain_scrapper, equity_history
+from nsepython import nse_get_top_gainers, nse_optionchain_scrapper, equity_history
 from backtesting import Backtest, Strategy
 from backtesting.lib import crossover
 import datetime
@@ -9,18 +9,18 @@ st.set_page_config(page_title="NSE Screener & Backtester", layout="wide")
 st.title("📈 NSE Stock & Options Screener + Backtester")
 
 st.header("1. Live Stock Screener")
-st.write("Fetches live NSE data and filters stocks based on percentage change.")
+st.write("Fetches live NSE Top Gainers data.")
 
 @st.cache_data(ttl=300)
 def fetch_nse_stocks():
-    nse_data = nse_eq("NIFTY 50")
+    # Using the correct function to get a list of stocks
+    gainers = nse_get_top_gainers()
     stocks = []
-    for item in nse_data['data']:
+    for item in gainers:
         stocks.append({
             'Symbol': item['symbol'],
-            'Last Price': item['lastPrice'],
-            'Day Change (%)': round(item['perChange'], 2),
-            'Volume': item['totalTradedVolume']
+            'Last Price': item['ltp'],
+            'Day Change (%)': round(float(item['pChange']), 2),
         })
     return pd.DataFrame(stocks)
 
@@ -28,9 +28,7 @@ if st.button("Run Stock Screener"):
     with st.spinner("Fetching live NSE data..."):
         try:
             df = fetch_nse_stocks()
-            filtered_df = df[(df['Day Change (%)'] > 1.0) & (df['Volume'] > 1000000)]
-            filtered_df = filtered_df.sort_values(by='Day Change (%)', ascending=False)
-            st.dataframe(filtered_df, use_container_width=True)
+            st.dataframe(df, use_container_width=True)
         except Exception as e:
             st.error(f"Error fetching NSE data: {e}")
 
@@ -59,7 +57,7 @@ if st.button("Run Options Screener"):
             high_oi_df = opt_df.sort_values(by='OI', ascending=False).head(10)
             st.dataframe(high_oi_df, use_container_width=True)
         except Exception as e:
-            st.error(f"Error fetching options data: {e}")
+            st.error(f"NSE blocked the cloud server or market is closed. Error: {e}")
 
 st.markdown("---")
 
