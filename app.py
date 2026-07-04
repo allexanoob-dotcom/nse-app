@@ -1,26 +1,40 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import plotly.graph_objects as go
+import pyotp
+from SmartApi import SmartConnect
+import datetime
 
-# --- 1. GROWW-STYLE UI & THEME ---
-st.set_page_config(page_title="Groww Style Screener", layout="wide", page_icon="📈")
+# --- PAGE SETUP ---
+st.set_page_config(page_title="Pro Stock & Option Terminal", layout="wide", page_icon="🚀")
+st.title("🚀 Pro Stock & Option Terminal")
 
-st.markdown("""
-    <style>
-        .stButton>button {
-            background-color: #5367ff; color: white; border-radius: 8px;
-            border: none; padding: 10px 24px; font-weight: bold; width: 100%;
-        }
-        .stButton>button:hover {
-            background-color: #00d09c; color: white;
-        }
-    </style>
-""", unsafe_allow_html=True)
+# --- ANGEL ONE LOGIN (For Options) ---
+st.sidebar.header("🔐 Angel One Login (For Options)")
+api_key = st.sidebar.text_input("API Key")
+client_code = st.sidebar.text_input("Client Code")
+password = st.sidebar.text_input("Password", type="password")
+totp_secret = st.sidebar.text_input("TOTP Secret")
 
-st.title("📈 Groww-Style Bulk Stock Screener")
-st.write("Scans 150+ top NSE stocks in seconds using bulk download.")
+if 'smart_api' not in st.session_state:
+    st.session_state.smart_api = None
 
-# --- 2. STOCK LIST (Top 150+ NSE Stocks across sectors) ---
+if st.sidebar.button("Login to Angel One"):
+    if api_key and client_code and password and totp_secret:
+        try:
+            obj = SmartConnect(api_key=api_key)
+            totp = pyotp.TOTP(totp_secret).now()
+            data = obj.generateSession(client_code, password, totp)
+            if data['status']:
+                st.session_state.smart_api = obj
+                st.sidebar.success("Login Successful! ✅")
+            else:
+                st.sidebar.error(f"Login Failed: {data['message']}")
+        except Exception as e:
+            st.sidebar.error(f"Error: {e}")
+
+# --- STOCK LIST (Top 100 NSE) ---
 STOCK_LIST = [
     "RELIANCE.NS","TCS.NS","HDFCBANK.NS","INFY.NS","ICICIBANK.NS","SBIN.NS","TATAMOTORS.NS",
     "ITC.NS","AXISBANK.NS","LT.NS","WIPRO.NS","MARUTI.NS","SUNPHARMA.NS","BAJFINANCE.NS",
@@ -34,84 +48,117 @@ STOCK_LIST = [
     "NYKAA.NS","PAYTM.NS","POLICYBZR.NS","BROS.NS","DMCC.NS","LAURUSLABS.NS","AUROPHARMA.NS",
     "LUPIN.NS","BIOCON.NS","SYNGENE.NS","CADILAHC.NS","TORNTPHARM.NS","PIIND.NS","UPL.NS",
     "APOLLOHOSP.NS","FORTIS.NS","MAXHEALTH.NS","GLOBALHEALTH.NS","LALPATHLAB.NS","METHEALTH.NS",
-    "DABUR.NS","GODREJCP.NS","COLPAL.NS","MARICO.NS","BRITANNIA.NS","UBL.NS","MCDOWELL-N.NS",
-    "TATACONSUM.NS","PGHH.NS","VSTIND.NS","NESTLEIND.NS","HINDPETRO.NS","BPCL.NS","ONGC.NS",
-    "GAIL.NS","NTPC.NS","POWERGRID.NS","TATAPOWER.NS","ADANIPOWER.NS","JSWENERGY.NS","NHPC.NS",
-    "SJVN.NS","SUZLON.NS","INOXWIND.NS","KPITTECH.NS","TATAELXSI.NS","BSE.NS","IEX.NS",
-    "IRCTC.NS","INDHOTEL.NS","JUBLFOOD.NS","DEVYANI.NS","SAPPHIRE.NS","TRENT.NS","ABEL.NS",
-    "AMARAJABAT.NS","EXIDEIND.NS","BOSCHLTD.NS","MOTHERSON.NS","BharatForge.NS","RAMCOCEM.NS",
-    "ULTRACEMCO.NS","SHREECEM.NS","AMBUJACEM.NS","ACC.NS","GRASIM.NS","JKCEMENT.NS","DALBHARAT.NS"
+    "DABUR.NS","GODREJCP.NS","COLPAL.NS","MARICO.NS","UBL.NS","MCDOWELL-N.NS","PGHH.NS",
+    "VSTIND.NS","HINDPETRO.NS","TATAPOWER.NS","ADANIPOWER.NS","JSWENERGY.NS","NHPC.NS","SJVN.NS",
+    "SUZLON.NS","INOXWIND.NS","KPITTECH.NS","TATAELXSI.NS","BSE.NS","IEX.NS","IRCTC.NS",
+    "INDHOTEL.NS","JUBLFOOD.NS","DEVYANI.NS","SAPPHIRE.NS","AMARAJABAT.NS","EXIDEIND.NS",
+    "BOSCHLTD.NS","MOTHERSON.NS","BharatForge.NS","RAMCOCEM.NS","SHREECEM.NS","AMBUJACEM.NS",
+    "ACC.NS","JKCEMENT.NS","DALBHARAT.NS"
 ]
 
-# --- 3. BULK DATA FETCHING (Super Fast) ---
-@st.cache_data(ttl=300)
-def fetch_bulk_stock_data():
-    # 1. Download all stocks at once! (period="5d" to ensure we have yesterday's close)
-    data = yf.download(STOCK_LIST, period="5d", progress=False, threads=True)
+# --- TABS SETUP ---
+tab1, tab2, tab3 = st.tabs(["📊 Stock Scanner", "📈 Chart Patterns", "🧩 Option Strategies"])
+
+# --- TAB 1: SCANNER ---
+with tab1:
+    st.header("Bulk Stock Scanner")
+    st.write("Scans 100+ NSE stocks in 2 seconds to find top gainers.")
     
-    if data.empty:
-        return pd.DataFrame()
-        
-    # 2. Extract Close prices and Volumes
-    closes = data['Close']
-    volumes = data['Volume']
+    @st.cache_data(ttl=300)
+    def fetch_bulk_data():
+        data = yf.download(STOCK_LIST, period="5d", progress=False, threads=True)
+        closes = data['Close']
+        volumes = data['Volume']
+        results = []
+        for ticker in STOCK_LIST:
+            if ticker in closes.columns:
+                valid_closes = closes[ticker].dropna()
+                if len(valid_closes) >= 2:
+                    cp = valid_closes.iloc[-1]
+                    pp = valid_closes.iloc[-2]
+                    change = ((cp - pp) / pp) * 100
+                    vol = volumes[ticker].dropna().iloc[-1]
+                    results.append({"Symbol": ticker.replace(".NS",""), "Price": round(cp,2), "Change(%)": round(change,2), "Volume": int(vol)})
+        return pd.DataFrame(results)
+
+    if st.button("Scan Market 🔎", key="scan"):
+        with st.spinner("Scanning..."):
+            df = fetch_bulk_data()
+            if not df.empty:
+                st.dataframe(df.sort_values(by="Change(%)", ascending=False), use_container_width=True, hide_index=True)
+
+# --- TAB 2: CHART PATTERNS ---
+with tab2:
+    st.header("Candlestick Chart Pattern Finder")
+    st.write("Type any stock symbol to see live Candlesticks and Moving Averages.")
     
-    # 3. Calculate Changes
-    results = []
-    for ticker in STOCK_LIST:
-        if ticker in closes.columns:
-            # Get last valid (today) and second to last (yesterday) prices
-            valid_closes = closes[ticker].dropna()
-            if len(valid_closes) >= 2:
-                current_price = valid_closes.iloc[-1]
-                prev_price = valid_closes.iloc[-2]
-                day_change_pct = ((current_price - prev_price) / prev_price) * 100
-                volume = volumes[ticker].dropna().iloc[-1]
+    chart_symbol = st.text_input("Enter Stock Symbol (e.g., RELIANCE)", "RELIANCE", key="chart_sym")
+    
+    if st.button("Draw Chart 📈", key="draw"):
+        with st.spinner(f"Drawing chart for {chart_symbol}..."):
+            try:
+                yf_sym = chart_symbol.upper().strip() + ".NS"
+                df = yf.Ticker(yf_sym).history(period="6mo")
                 
-                results.append({
-                    "Symbol": ticker.replace(".NS", ""),
-                    "Current Price (₹)": round(current_price, 2),
-                    "Day Change (%)": round(day_change_pct, 2),
-                    "Volume": int(volume)
-                })
-                
-    return pd.DataFrame(results)
+                if not df.empty:
+                    # Calculate Moving Averages
+                    df['MA20'] = df['Close'].rolling(window=20).mean()
+                    df['MA50'] = df['Close'].rolling(window=50).mean()
+                    
+                    # Create Plotly Candlestick Chart
+                    fig = go.Figure(data=[go.Candlestick(
+                        x=df.index,
+                        open=df['Open'], high=df['High'],
+                        low=df['Low'], close=df['Close'],
+                        name="Candles"
+                    )])
+                    
+                    # Add Moving Averages
+                    fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], mode='lines', name='MA 20', line=dict(color='blue', width=1)))
+                    fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], mode='lines', name='MA 50', line=dict(color='orange', width=1)))
+                    
+                    fig.update_layout(title=f"{chart_symbol} Live Chart", xaxis_rangeslider_visible=False, height=600)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.error("Stock not found.")
+            except Exception as e:
+                st.error(f"Error: {e}")
 
-# --- 4. SIDEBAR FILTERS (Groww Style) ---
-st.sidebar.header("🔍 Screener Filters")
-st.sidebar.write("Adjust sliders to filter stocks.")
-
-min_price = st.sidebar.slider("Minimum Price (₹)", 0.0, 5000.0, 0.0, 50.0)
-max_price = st.sidebar.slider("Maximum Price (₹)", 0.0, 10000.0, 10000.0, 50.0)
-min_change = st.sidebar.slider("Minimum Day Change (%)", -10.0, 10.0, 0.0, 0.5)
-min_volume = st.sidebar.slider("Minimum Volume", 0, 50000000, 0, 100000)
-
-# --- 5. MAIN APP LOGIC ---
-if st.button("Scan 150+ Stocks 🔎"):
-    with st.spinner("Fetching bulk live market data... (2 seconds)"):
-        df = fetch_bulk_stock_data()
-        
-        if df.empty:
-            st.error("Could not fetch data. Market might be closed or API blocked.")
-        else:
-            # Apply Filters
-            filtered_df = df[
-                (df['Current Price (₹)'] >= min_price) &
-                (df['Current Price (₹)'] <= max_price) &
-                (df['Day Change (%)'] >= min_change) &
-                (df['Volume'] >= min_volume)
-            ].sort_values(by="Day Change (%)", ascending=False)
-            
-            if filtered_df.empty:
-                st.warning("No stocks found matching your filters. Try widening your search.")
-            else:
-                st.success(f"Found {len(filtered_df)} stocks matching your criteria.")
-                # Display clean table
-                st.dataframe(
-                    filtered_df, 
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Day Change (%)": st.column_config.NumberColumn(format="%.2f%%")
-                    }
-                )
+# --- TAB 3: OPTION STRATEGIES ---
+with tab3:
+    st.header("NIFTY Option Chain Strategy Finder")
+    st.write("Finds Highest Open Interest (Support & Resistance) using Angel One.")
+    
+    if st.session_state.smart_api is None:
+        st.warning("Please login to Angel One in the sidebar to use Option Strategies.")
+    else:
+        if st.button("Fetch Option Chain 🧩", key="opt"):
+            with st.spinner("Fetching live NIFTY options..."):
+                try:
+                    obj = st.session_state.smart_api
+                    # Angel One API for Option Chain
+                    oc = obj.optionChain("NSE", "NIFTY")
+                    
+                    if oc['status']:
+                        opt_data = oc['data']['oc']
+                        records = []
+                        for strike, chain in opt_data.items():
+                            ce_oi = chain.get('ce', {}).get('oi', 0)
+                            pe_oi = chain.get('pe', {}).get('oi', 0)
+                            if ce_oi > 0 or pe_oi > 0:
+                                records.append({
+                                    "Strike Price": strike,
+                                    "Call OI (Resistance)": ce_oi,
+                                    "Put OI (Support)": pe_oi
+                                })
+                        
+                        opt_df = pd.DataFrame(records)
+                        opt_df['Total OI'] = opt_df['Call OI (Resistance)'] + opt_df['Put OI (Support)']
+                        opt_df = opt_df.sort_values(by="Total OI", ascending=False).head(10)
+                        
+                        st.success("Top 10 Strikes with Highest Open Interest:")
+                        st.dataframe(opt_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.error("Failed to fetch option chain.")
+                except Exception as e:
+                    st.error(f"Error fetching options: {e}")
