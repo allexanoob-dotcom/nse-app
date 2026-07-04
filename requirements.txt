@@ -1,9 +1,7 @@
 streamlit
 pandas
-nsepython
 backtesting
 plotly
-mibian
 pyotp
 logzero
 smartapi-python
