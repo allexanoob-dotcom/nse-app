@@ -5,7 +5,7 @@ from SmartApi import SmartConnect
 from backtesting import Backtest, Strategy
 from backtesting.lib import crossover
 import datetime
-import yfinance as yf  # We use Yahoo Finance for historical data!
+import yfinance as yf
 
 st.set_page_config(page_title="Angel One Pro Screener", layout="wide")
 st.title("🚀 Pro Screener & Backtester")
@@ -44,7 +44,7 @@ else:
     
     # --- BACKTESTING ENGINE (Using Yahoo Finance Data) ---
     st.header("📈 Backtesting Engine")
-    st.write("Uses Yahoo Finance historical data. Works perfectly on the cloud without needing symbol tokens!")
+    st.write("Uses Yahoo Finance historical data. Works perfectly on the cloud!")
     
     symbol = st.text_input("Enter NSE Stock Symbol (e.g., RELIANCE, TCS, SBIN)", "RELIANCE")
     
@@ -54,10 +54,9 @@ else:
                 # Yahoo Finance uses ".NS" at the end for NSE stocks
                 yf_symbol = symbol.upper().strip() + ".NS"
                 
-                # Fetch 1 year of daily data
-                end_date = datetime.date.today()
-                start_date = end_date - datetime.timedelta(days=365)
-                data = yf.download(yf_symbol, start=start_date, end=end_date, progress=False)
+                # Using Ticker().history() is more stable than download()
+                ticker = yf.Ticker(yf_symbol)
+                data = ticker.history(period="1y")
                 
                 if data.empty:
                     st.error("Could not find data. Please check the stock symbol.")
