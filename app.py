@@ -57,15 +57,23 @@ else:
                 end_date = datetime.datetime.today()
                 start_date = end_date - datetime.timedelta(days=365)
                 
+                # Format dates exactly how Angel One wants them
                 start_str = start_date.strftime("%Y-%m-%d %H:%M")
                 end_str = end_date.strftime("%Y-%m-%d %H:%M")
                 
-                # Fetch from Angel One
-                hist = obj.historicalData(token, "NSE", "ONE_DAY", start_str, end_str)
-                df = pd.DataFrame(hist)
+                # Use the NEW candleData function
+                historicParam = {
+                    "exchange": "NSE",
+                    "symboltoken": token,
+                    "interval": "ONE_DAY",
+                    "fromdate": start_str,
+                    "todate": end_str
+                }
+                hist = obj.candleData(historicParam)
                 
-                # Format for Backtesting library
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                # Format the data into a Pandas DataFrame
+                df = pd.DataFrame(hist['data'], columns=["timestamp", "open", "high", "low", "close", "volume"])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
                 df.set_index('timestamp', inplace=True)
                 
                 bt_data = pd.DataFrame({
