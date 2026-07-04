@@ -1,9 +1,8 @@
 streamlit
 pandas
-backtesting
+yfinance
 plotly
 pyotp
 logzero
 smartapi-python
 websocket-client
-yfinance
