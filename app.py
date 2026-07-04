@@ -2,131 +2,130 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from backtesting import Backtest, Strategy
-from backtesting.lib import crossover
-import plotly.graph_objects as go
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title="AI Strategy Backtester", layout="wide", page_icon="🧠")
-st.title("🧠 AI Strategy Backtester & Optimizer")
-st.write("This AI tests thousands of parameter combinations to find the most profitable trading strategy.")
+st.set_page_config(page_title="AI Strategy Scanner", layout="wide", page_icon="🎯")
+st.title("🎯 Custom Strategy Scanner")
+st.write("Build your own trading strategy using the sidebar, and scan 50+ NSE stocks instantly to find matches.")
 
-# --- TABS ---
-tab1, tab2 = st.tabs(["📈 AI Stock Optimizer", "🧩 Option Payoff Calculator"])
+# --- STOCK LIST (Top 50 NSE) ---
+STOCK_LIST = [
+    "RELIANCE.NS","TCS.NS","HDFCBANK.NS","INFY.NS","ICICIBANK.NS","SBIN.NS","TATAMOTORS.NS",
+    "ITC.NS","AXISBANK.NS","LT.NS","WIPRO.NS","MARUTI.NS","SUNPHARMA.NS","BAJFINANCE.NS",
+    "HINDUNILVR.NS","KOTAKBANK.NS","ASIANPAINT.NS","HCLTECH.NS","BHARTIARTL.NS","TITAN.NS",
+    "TATASTEEL.NS","ULTRACEMCO.NS","NESTLEIND.NS","ONGC.NS","NTPC.NS","POWERGRID.NS","M&M.NS",
+    "TECHM.NS","COALINDIA.NS","BAJAJFINSV.NS","GRASIM.NS","HDFCLIFE.NS","SBILIFE.NS","JSWSTEEL.NS",
+    "DIVISLAB.NS","DRREDDY.NS","CIPLA.NS","BRITANNIA.NS","EICHERMOT.NS","ADANIENT.NS","ADANIPORTS.NS",
+    "HINDALCO.NS","HEROMOTOCO.NS","BAJAJ-AUTO.NS","VEDL.NS","TATACONSUM.NS","GAIL.NS","IOC.NS",
+    "BPCL.NS","SHRIRAMFIN.NS"
+]
 
-# ==========================================
-# TAB 1: AI STOCK OPTIMIZER
-# ==========================================
-with tab1:
-    st.header("AI Moving Average Optimizer")
-    st.write("The AI will scan from 5-day to 50-day Moving Averages to find the best crossover strategy.")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        symbol = st.text_input("Enter Stock Symbol", "RELIANCE")
-    with col2:
-        capital = st.number_input("Starting Capital (₹)", value=100000)
+# --- HELPER FUNCTIONS TO CALCULATE INDICATORS ---
+def calculate_rsi(series, period=14):
+    delta = series.diff(1)
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.rolling(window=period, min_periods=period).mean()
+    avg_loss = loss.rolling(window=period, min_periods=period).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1.0 + rs))
+
+def calculate_sma(series, period):
+    return series.rolling(window=period).mean()
+
+# --- SIDEBAR: STRATEGY BUILDER ---
+st.sidebar.header("🛠️ Build Your Strategy")
+st.sidebar.write("Select up to 2 conditions to find matching stocks.")
+
+# Condition 1
+st.sidebar.subheader("Condition 1")
+ind1 = st.sidebar.selectbox("Indicator 1", ["Close Price", "SMA 20", "SMA 50", "RSI 14"])
+op1 = st.sidebar.selectbox("Operator", [">", "<"])
+val1_type = st.sidebar.selectbox("Compare against", ["A Number", "Another Indicator"])
+if val1_type == "A Number":
+    val1 = st.sidebar.number_input("Value", value=100.0)
+else:
+    val1 = st.sidebar.selectbox("Indicator 2", ["Close Price", "SMA 20", "SMA 50", "RSI 14"])
+
+# Condition 2 (Optional)
+use_cond2 = st.sidebar.checkbox("Add Condition 2 (AND)")
+if use_cond2:
+    st.sidebar.subheader("Condition 2")
+    ind2 = st.sidebar.selectbox("Indicator A", ["Close Price", "SMA 20", "SMA 50", "RSI 14"], key="ind2")
+    op2 = st.sidebar.selectbox("Operator", [">", "<"], key="op2")
+    val2_type = st.sidebar.selectbox("Compare against", ["A Number", "Another Indicator"], key="val2_type")
+    if val2_type == "A Number":
+        val2 = st.sidebar.number_input("Value", value=50.0, key="val2")
+    else:
+        val2 = st.sidebar.selectbox("Indicator B", ["Close Price", "SMA 20", "SMA 50", "RSI 14"], key="val2_sel")
+
+# --- MAIN APP LOGIC ---
+if st.button("🔍 Scan Market for Matches"):
+    with st.spinner("Scanning 50+ stocks against your strategy... (Takes ~10 seconds)"):
         
-    if st.button("🚀 Run AI Optimization"):
-        with st.spinner("AI is testing thousands of strategies... This takes 10 seconds."):
+        # Download all data at once for speed
+        data = yf.download(STOCK_LIST, period="3mo", progress=False, threads=True)
+        
+        matching_stocks = []
+        
+        for ticker in STOCK_LIST:
             try:
-                # 1. Fetch Data
-                yf_sym = symbol.upper().strip() + ".NS"
-                data = yf.Ticker(yf_sym).history(period="2y")
+                if ticker not in data['Close'].columns:
+                    continue
+                    
+                df = pd.DataFrame({
+                    'Close': data['Close'][ticker].dropna(),
+                    'High': data['High'][ticker].dropna(),
+                    'Low': data['Low'][ticker].dropna()
+                })
                 
-                if data.empty:
-                    st.error("Could not find data.")
-                else:
-                    bt_data = pd.DataFrame({
-                        'Open': data['Open'].astype(float),
-                        'High': data['High'].astype(float),
-                        'Low': data['Low'].astype(float),
-                        'Close': data['Close'].astype(float),
-                        'Volume': data['Volume'].astype(float)
+                if len(df) < 50:
+                    continue
+                
+                # Calculate Indicators
+                df['SMA 20'] = calculate_sma(df['Close'], 20)
+                df['SMA 50'] = calculate_sma(df['Close'], 50)
+                df['RSI 14'] = calculate_rsi(df['Close'], 14)
+                
+                # Get today's values (last row)
+                today = df.iloc[-1]
+                
+                # Helper to get value
+                def get_val(name):
+                    if name == "Close Price": return today['Close']
+                    elif name == "SMA 20": return today['SMA 20']
+                    elif name == "SMA 50": return today['SMA 50']
+                    elif name == "RSI 14": return today['RSI 14']
+                    else: return float(name)
+                
+                # Check Condition 1
+                left1 = get_val(ind1)
+                right1 = get_val(val1) if val1_type == "Another Indicator" else val1
+                cond1_met = (left1 > right1) if op1 == ">" else (left1 < right1)
+                
+                # Check Condition 2 (if used)
+                cond2_met = True
+                if use_cond2:
+                    left2 = get_val(ind2)
+                    right2 = get_val(val2) if val2_type == "Another Indicator" else val2
+                    cond2_met = (left2 > right2) if op2 == ">" else (left2 < right2)
+                
+                # If both conditions are met, add to list
+                if cond1_met and cond2_met:
+                    matching_stocks.append({
+                        "Symbol": ticker.replace(".NS", ""),
+                        "Close Price (₹)": round(today['Close'], 2),
+                        "SMA 20 (₹)": round(today['SMA 20'], 2) if not np.isnan(today['SMA 20']) else "N/A",
+                        "RSI 14": round(today['RSI 14'], 2) if not np.isnan(today['RSI 14']) else "N/A"
                     })
                     
-                    # 2. Define Strategy
-                    class SmaCross(Strategy):
-                        n1 = 10  # Default fast MA
-                        n2 = 20  # Default slow MA
-                        
-                        def init(self):
-                            self.sma1 = self.I(lambda x: pd.Series(x).rolling(self.n1).mean(), self.data.Close)
-                            self.sma2 = self.I(lambda x: pd.Series(x).rolling(self.n2).mean(), self.data.Close)
-                            
-                        def next(self):
-                            if crossover(self.sma1, self.sma2):
-                                self.position.close()
-                                self.buy()
-                            elif crossover(self.sma2, self.sma1):
-                                self.position.close()
-                                self.sell()
-                    
-                    # 3. Run AI Optimization
-                    bt = Backtest(bt_data, SmaCross, cash=capital, commission=.002)
-                    
-                    # AI tests n1 from 5 to 40, and n2 from 10 to 50
-                    stats = bt.optimize(
-                        n1=range(5, 40, 5),
-                        n2=range(10, 50, 5),
-                        maximize='Return [%]',  # Tell AI to find highest return
-                        constraint=lambda p: p.n1 < p.n2  # Fast MA must be smaller than Slow MA
-                    )
-                    
-                    # 4. Display AI Results
-                    st.success("AI Optimization Complete!")
-                    
-                    col_a, col_b, col_c = st.columns(3)
-                    col_a.metric("Best Fast MA (n1)", stats['_strategy'].n1)
-                    col_b.metric("Best Slow MA (n2)", stats['_strategy'].n2)
-                    col_c.metric("Total Return", f"{stats['Return [%]']}%")
-                    
-                    st.subheader("Detailed AI Statistics")
-                    st.write(f"Final Equity: ₹{stats['Equity Final [$]']:,.2f}")
-                    st.write(f"Win Rate: {stats['Win Rate [%]']}%")
-                    st.write(f"Max Drawdown: {stats['Max. Drawdown [%]']}%")
-                    st.write(f"Number of Trades: {stats['# Trades']}")
-                    
-                    st.subheader("AI Optimized Equity Curve")
-                    bt.plot()
-                    
             except Exception as e:
-                st.error(f"Error: {e}")
-
-# ==========================================
-# TAB 2: OPTION PAYOFF CALCULATOR
-# ==========================================
-with tab2:
-    st.header("Option Strategy Payoff Calculator")
-    st.write("Visualize how much money an Option Strategy makes at different market prices.")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        strategy = st.selectbox("Choose Strategy", ["Long Call", "Long Put", "Bull Call Spread"])
-    with col2:
-        spot_price = st.number_input("Current NIFTY/Stock Price", value=22000)
-    with col3:
-        target_range = st.number_input("Price Range to Test (+/-)", value=500)
-        
-    if strategy == "Long Call":
-        strike = st.number_input("Strike Price Bought", value=22000)
-        premium = st.number_input("Premium Paid", value=100)
-        
-        if st.button("Calculate Payoff"):
-            # Generate prices from -range to +range
-            prices = np.linspace(spot_price - target_range, spot_price + target_range, 100)
-            payoffs = []
-            
-            for p in prices:
-                # Long Call payoff: Max(0, Price - Strike) - Premium
-                intrinsic = max(0, p - strike)
-                payoff = (intrinsic - premium) * 50 # *50 for NIFTY lot size
-                payoffs.append(payoff)
+                pass
                 
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=prices, y=payoffs, mode='lines', name='Payoff', line=dict(color='blue', width=3)))
-            fig.add_hline(y=0, line_dash="dash", line_color="red")
-            fig.update_layout(title=f"{strategy} Payoff Diagram", xaxis_title="Price at Expiry", yaxis_title="Profit / Loss (₹)")
-            st.plotly_chart(fig, use_container_width=True)
-            
-            st.info(f"Breakeven Price: ₹{strike + premium} (Lot size assumed 50)")
+        # Display Results
+        if matching_stocks:
+            st.success(f"🎯 Found {len(matching_stocks)} stocks matching your strategy!")
+            result_df = pd.DataFrame(matching_stocks)
+            st.dataframe(result_df, use_container_width=True, hide_index=True)
+        else:
+            st.warning("No stocks found matching your strategy today. Try changing your conditions.")
