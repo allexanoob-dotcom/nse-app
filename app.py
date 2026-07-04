@@ -4,11 +4,11 @@ import pandas as pd
 import numpy as np
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title="AI Strategy Scanner", layout="wide", page_icon="🎯")
-st.title("🎯 Custom Strategy Scanner")
-st.write("Build your own trading strategy using the sidebar, and scan 50+ NSE stocks instantly to find matches.")
+st.set_page_config(page_title="Chart Pattern Scanner", layout="wide", page_icon="📊")
+st.title("📊 Chart Pattern Scanner (Nifty 500)")
+st.write("Scans 150+ top NSE stocks instantly to find Breakouts and Candlestick Patterns.")
 
-# --- STOCK LIST (Top 50 NSE) ---
+# --- NIFTY 500 STOCK LIST (Top 150+ highly liquid) ---
 STOCK_LIST = [
     "RELIANCE.NS","TCS.NS","HDFCBANK.NS","INFY.NS","ICICIBANK.NS","SBIN.NS","TATAMOTORS.NS",
     "ITC.NS","AXISBANK.NS","LT.NS","WIPRO.NS","MARUTI.NS","SUNPHARMA.NS","BAJFINANCE.NS",
@@ -17,115 +17,107 @@ STOCK_LIST = [
     "TECHM.NS","COALINDIA.NS","BAJAJFINSV.NS","GRASIM.NS","HDFCLIFE.NS","SBILIFE.NS","JSWSTEEL.NS",
     "DIVISLAB.NS","DRREDDY.NS","CIPLA.NS","BRITANNIA.NS","EICHERMOT.NS","ADANIENT.NS","ADANIPORTS.NS",
     "HINDALCO.NS","HEROMOTOCO.NS","BAJAJ-AUTO.NS","VEDL.NS","TATACONSUM.NS","GAIL.NS","IOC.NS",
-    "BPCL.NS","SHRIRAMFIN.NS"
+    "BPCL.NS","SHRIRAMFIN.NS","JINDALSTEL.NS","PNB.NS","BANKBARODA.NS","CANBK.NS","IDFCFIRSTB.NS",
+    "INDUSINDBK.NS","AUBANK.NS","FEDERALBNK.NS","BANDHANBNK.NS","DMART.NS","TRENT.NS","ZOMATO.NS",
+    "NYKAA.NS","PAYTM.NS","POLICYBZR.NS","BROS.NS","DMCC.NS","LAURUSLABS.NS","AUROPHARMA.NS",
+    "LUPIN.NS","BIOCON.NS","SYNGENE.NS","CADILAHC.NS","TORNTPHARM.NS","PIIND.NS","UPL.NS",
+    "APOLLOHOSP.NS","FORTIS.NS","MAXHEALTH.NS","GLOBALHEALTH.NS","LALPATHLAB.NS","METHEALTH.NS",
+    "DABUR.NS","GODREJCP.NS","COLPAL.NS","MARICO.NS","UBL.NS","MCDOWELL-N.NS","PGHH.NS",
+    "VSTIND.NS","HINDPETRO.NS","TATAPOWER.NS","ADANIPOWER.NS","JSWENERGY.NS","NHPC.NS","SJVN.NS",
+    "SUZLON.NS","INOXWIND.NS","KPITTECH.NS","TATAELXSI.NS","BSE.NS","IEX.NS","IRCTC.NS",
+    "INDHOTEL.NS","JUBLFOOD.NS","DEVYANI.NS","SAPPHIRE.NS","AMARAJABAT.NS","EXIDEIND.NS",
+    "BOSCHLTD.NS","MOTHERSON.NS","BharatForge.NS","RAMCOCEM.NS","SHREECEM.NS","AMBUJACEM.NS",
+    "ACC.NS","JKCEMENT.NS","DALBHARAT.NS","PIDILITIND.NS","SIEMENS.NS","ABB.NS","HAVELLS.NS",
+    "POLYCAB.NS","DIXON.NS","AMBER.NS","KAYNES.NS","SYRMA.NS","HINDUSTANZINC.NS","BALCO.NS",
+    "NMDC.NS","ATGL.NS","GTLINFRA.NS","INDIAMART.NS","INFOEDGE.NS","ABFRL.NS","PAGEIND.NS"
 ]
 
-# --- HELPER FUNCTIONS TO CALCULATE INDICATORS ---
-def calculate_rsi(series, period=14):
-    delta = series.diff(1)
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    avg_gain = gain.rolling(window=period, min_periods=period).mean()
-    avg_loss = loss.rolling(window=period, min_periods=period).mean()
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1.0 + rs))
+# --- BULK DATA FETCHING ---
+@st.cache_data(ttl=300)
+def fetch_bulk_data():
+    # Fetch 3 months of data to calculate 20-day highs/lows
+    data = yf.download(STOCK_LIST, period="3mo", progress=False, threads=True)
+    return data
 
-def calculate_sma(series, period):
-    return series.rolling(window=period).mean()
-
-# --- SIDEBAR: STRATEGY BUILDER ---
-st.sidebar.header("🛠️ Build Your Strategy")
-st.sidebar.write("Select up to 2 conditions to find matching stocks.")
-
-# Condition 1
-st.sidebar.subheader("Condition 1")
-ind1 = st.sidebar.selectbox("Indicator 1", ["Close Price", "SMA 20", "SMA 50", "RSI 14"])
-op1 = st.sidebar.selectbox("Operator", [">", "<"])
-val1_type = st.sidebar.selectbox("Compare against", ["A Number", "Another Indicator"])
-if val1_type == "A Number":
-    val1 = st.sidebar.number_input("Value", value=100.0)
-else:
-    val1 = st.sidebar.selectbox("Indicator 2", ["Close Price", "SMA 20", "SMA 50", "RSI 14"])
-
-# Condition 2 (Optional)
-use_cond2 = st.sidebar.checkbox("Add Condition 2 (AND)")
-if use_cond2:
-    st.sidebar.subheader("Condition 2")
-    ind2 = st.sidebar.selectbox("Indicator A", ["Close Price", "SMA 20", "SMA 50", "RSI 14"], key="ind2")
-    op2 = st.sidebar.selectbox("Operator", [">", "<"], key="op2")
-    val2_type = st.sidebar.selectbox("Compare against", ["A Number", "Another Indicator"], key="val2_type")
-    if val2_type == "A Number":
-        val2 = st.sidebar.number_input("Value", value=50.0, key="val2")
-    else:
-        val2 = st.sidebar.selectbox("Indicator B", ["Close Price", "SMA 20", "SMA 50", "RSI 14"], key="val2_sel")
-
-# --- MAIN APP LOGIC ---
-if st.button("🔍 Scan Market for Matches"):
-    with st.spinner("Scanning 50+ stocks against your strategy... (Takes ~10 seconds)"):
+# --- PATTERN DETECTION LOGIC ---
+def detect_patterns(data):
+    results = []
+    
+    closes = data['Close']
+    opens = data['Open']
+    highs = data['High']
+    lows = data['Low']
+    
+    for ticker in STOCK_LIST:
+        if ticker not in closes.columns:
+            continue
+            
+        # Get last 3 days of data
+        hist_close = closes[ticker].dropna().tail(3)
+        hist_open = opens[ticker].dropna().tail(3)
+        hist_high = highs[ticker].dropna().tail(20)
         
-        # Download all data at once for speed
-        data = yf.download(STOCK_LIST, period="3mo", progress=False, threads=True)
+        if len(hist_close) < 3 or len(hist_high) < 20:
+            continue
+            
+        # Today's and Yesterday's data
+        t_close = hist_close.iloc[-1]
+        t_open = hist_open.iloc[-1]
+        y_close = hist_close.iloc[-2]
+        y_open = hist_open.iloc[-2]
         
-        matching_stocks = []
+        pattern = "None"
         
-        for ticker in STOCK_LIST:
-            try:
-                if ticker not in data['Close'].columns:
-                    continue
+        # 1. Bullish Engulfing Pattern
+        # Yesterday was Red (Close < Open) AND Today is Green (Close > Open)
+        # Today's body completely covers Yesterday's body
+        if (y_close < y_open) and (t_close > t_open):
+            if (t_close >= y_open) and (t_open <= y_close):
+                pattern = "Bullish Engulfing"
+                
+        # 2. 20-Day Breakout Pattern
+        # Today's close is the highest in the last 20 days
+        max_20_day_high = hist_high.iloc[:-1].max() # Max of last 19 days
+        if t_close > max_20_day_high:
+            pattern = "20-Day Breakout"
+            
+        if pattern != "None":
+            results.append({
+                "Symbol": ticker.replace(".NS", ""),
+                "Pattern Detected": pattern,
+                "Current Price (₹)": round(t_close, 2),
+                "20-Day High (₹)": round(hist_high.max(), 2)
+            })
+            
+    return pd.DataFrame(results)
+
+# --- MAIN APP UI ---
+st.sidebar.header("📊 Pattern Settings")
+st.sidebar.write("The scanner checks the last 3 days of candles for patterns.")
+
+if st.button("🔍 Scan Nifty 500 for Patterns"):
+    with st.spinner("Fetching data for 150+ stocks and detecting patterns... (Takes ~10 seconds)"):
+        try:
+            raw_data = fetch_bulk_data()
+            df_results = detect_patterns(raw_data)
+            
+            if df_results.empty:
+                st.warning("No chart patterns found in the market today. Try again tomorrow!")
+            else:
+                st.success(f"🎯 Found {len(df_results)} stocks with chart patterns today!")
+                
+                # Split into two columns for better viewing
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("🚀 Breakout Stocks")
+                    breakout_df = df_results[df_results['Pattern Detected'] == '20-Day Breakout']
+                    st.dataframe(breakout_df, use_container_width=True, hide_index=True)
                     
-                df = pd.DataFrame({
-                    'Close': data['Close'][ticker].dropna(),
-                    'High': data['High'][ticker].dropna(),
-                    'Low': data['Low'][ticker].dropna()
-                })
-                
-                if len(df) < 50:
-                    continue
-                
-                # Calculate Indicators
-                df['SMA 20'] = calculate_sma(df['Close'], 20)
-                df['SMA 50'] = calculate_sma(df['Close'], 50)
-                df['RSI 14'] = calculate_rsi(df['Close'], 14)
-                
-                # Get today's values (last row)
-                today = df.iloc[-1]
-                
-                # Helper to get value
-                def get_val(name):
-                    if name == "Close Price": return today['Close']
-                    elif name == "SMA 20": return today['SMA 20']
-                    elif name == "SMA 50": return today['SMA 50']
-                    elif name == "RSI 14": return today['RSI 14']
-                    else: return float(name)
-                
-                # Check Condition 1
-                left1 = get_val(ind1)
-                right1 = get_val(val1) if val1_type == "Another Indicator" else val1
-                cond1_met = (left1 > right1) if op1 == ">" else (left1 < right1)
-                
-                # Check Condition 2 (if used)
-                cond2_met = True
-                if use_cond2:
-                    left2 = get_val(ind2)
-                    right2 = get_val(val2) if val2_type == "Another Indicator" else val2
-                    cond2_met = (left2 > right2) if op2 == ">" else (left2 < right2)
-                
-                # If both conditions are met, add to list
-                if cond1_met and cond2_met:
-                    matching_stocks.append({
-                        "Symbol": ticker.replace(".NS", ""),
-                        "Close Price (₹)": round(today['Close'], 2),
-                        "SMA 20 (₹)": round(today['SMA 20'], 2) if not np.isnan(today['SMA 20']) else "N/A",
-                        "RSI 14": round(today['RSI 14'], 2) if not np.isnan(today['RSI 14']) else "N/A"
-                    })
+                with col2:
+                    st.subheader("🟢 Bullish Engulfing Stocks")
+                    engulfing_df = df_results[df_results['Pattern Detected'] == 'Bullish Engulfing']
+                    st.dataframe(engulfing_df, use_container_width=True, hide_index=True)
                     
-            except Exception as e:
-                pass
-                
-        # Display Results
-        if matching_stocks:
-            st.success(f"🎯 Found {len(matching_stocks)} stocks matching your strategy!")
-            result_df = pd.DataFrame(matching_stocks)
-            st.dataframe(result_df, use_container_width=True, hide_index=True)
-        else:
-            st.warning("No stocks found matching your strategy today. Try changing your conditions.")
+        except Exception as e:
+            st.error(f"Error scanning market: {e}")
