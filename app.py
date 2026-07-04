@@ -1,18 +1,16 @@
 import streamlit as st
-from streamlit.cache_data import cache_data # Add this
-import streamlit as st
 import pandas as pd
 from nsepython import nse_eq, nse_optionchain_scrapper, equity_history
 from backtesting import Backtest, Strategy
 from backtesting.lib import crossover
 import datetime
 
-# --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="NSE Screener & Backtester", layout="wide")
 st.title("📈 NSE Stock & Options Screener + Backtester")
 
-# --- 1. STOCK SCREENER ---
-# Cache the data for 5 minutes (300 seconds)
+st.header("1. Live Stock Screener")
+st.write("Fetches live NSE data and filters stocks based on percentage change.")
+
 @st.cache_data(ttl=300)
 def fetch_nse_stocks():
     nse_data = nse_eq("NIFTY 50")
@@ -30,26 +28,41 @@ if st.button("Run Stock Screener"):
     with st.spinner("Fetching live NSE data..."):
         try:
             df = fetch_nse_stocks()
-            # ... rest of your filtering code ...# --- 2. OPTIONS SCREENER ---
-# Cache the data for 5 minutes (300 seconds)
-@st.cache_data(ttl=300)
-def fetch_nse_stocks():
-    nse_data = nse_eq("NIFTY 50")
-    stocks = []
-    for item in nse_data['data']:
-        stocks.append({
-            'Symbol': item['symbol'],
-            'Last Price': item['lastPrice'],
-            'Day Change (%)': round(item['perChange'], 2),
-            'Volume': item['totalTradedVolume']
-        })
-    return pd.DataFrame(stocks)
+            filtered_df = df[(df['Day Change (%)'] > 1.0) & (df['Volume'] > 1000000)]
+            filtered_df = filtered_df.sort_values(by='Day Change (%)', ascending=False)
+            st.dataframe(filtered_df, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error fetching NSE data: {e}")
 
-if st.button("Run Stock Screener"):
-    with st.spinner("Fetching live NSE data..."):
+st.markdown("---")
+
+st.header("2. Live Options Chain Screener (NIFTY)")
+st.write("Filters NIFTY options based on Open Interest (OI).")
+
+@st.cache_data(ttl=300)
+def fetch_nse_options():
+    oi_data = nse_optionchain_scrapper("NIFTY")
+    options_list = []
+    for record in oi_data['records']['data']:
+        strike = record.get('strikePrice')
+        expiry = record.get('expiryDate')
+        if 'CE' in record:
+            options_list.append({'Strike': strike, 'Type': 'CE', 'Expiry': expiry, 'OI': record['CE'].get('openInterest'), 'IV': record['CE'].get('impliedVolatility')})
+        if 'PE' in record:
+            options_list.append({'Strike': strike, 'Type': 'PE', 'Expiry': expiry, 'OI': record['PE'].get('openInterest'), 'IV': record['PE'].get('impliedVolatility')})
+    return pd.DataFrame(options_list)
+
+if st.button("Run Options Screener"):
+    with st.spinner("Fetching NSE Options Chain..."):
         try:
-            df = fetch_nse_stocks()
-            # ... rest of your filtering code ...# --- 3. BACKTESTING ENGINE ---
+            opt_df = fetch_nse_options()
+            high_oi_df = opt_df.sort_values(by='OI', ascending=False).head(10)
+            st.dataframe(high_oi_df, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error fetching options data: {e}")
+
+st.markdown("---")
+
 st.header("3. Backtesting Engine (SMA Crossover)")
 symbol = st.text_input("Enter NSE Stock Symbol (e.g., SBIN, RELIANCE, TCS)", "SBIN")
 
@@ -96,16 +109,3 @@ if st.button("Run Backtest"):
 
         except Exception as e:
             st.error(f"Error during backtesting: {e}. Check the stock symbol.")
-import mibian
-
-def calculate_greeks(spot, strike, days_to_expiry, iv, option_type='CE'):
-    if days_to_expiry <= 0 or iv <= 0:
-        return None, None
-    
-    # mibian.BS([Spot, Strike, InterestRate, DaysToExpiry], volatility=IV)
-    bs = mibian.BS([spot, strike, 10, days_to_expiry], volatility=iv*100)
-    
-    if option_type == 'CE':
-        return bs.callDelta, bs.callTheta
-    else:
-        return bs.putDelta, bs.putTheta
